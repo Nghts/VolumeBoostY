@@ -201,6 +201,16 @@ static void SetCustomVolumeMultiplier(float multiplier) {
 }
 %end
 
+%hook IVSPlayer
+
+- (void)setVolume:(float)volume {
+    // Intercept or scale stream volume here
+    NSLog(@"[TwitchTweak] IVSPlayer setVolume: %f", volume);
+    %orig(volume);
+}
+
+%end
+
     // -----------------------------------------------------
     // UI Hooks for Configuration (Native Touch Tracking via sendEvent:)
     // -----------------------------------------------------
