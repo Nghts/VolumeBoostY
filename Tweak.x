@@ -48,6 +48,40 @@ titleDescription:(NSString *)titleDescription
 static const NSInteger TweakSection = 'ndyt';
 static NSString *const kVolumeBoostYTEnabledKey = @"VolumeBoostYTEnabled";
 
+// Logs are written both to NSLog (visible in Flex/syslog tools) and to a small
+// file that can be pulled from the injected app's environment.
+static NSString *const kVolumeBoostYTLogPath = @"/tmp/VolumeBoostYT.log";
+
+static void VolumeBoostYTLog(NSString *format, ...) {
+  va_list arguments;
+  va_start(arguments, format);
+  NSString *message = [[NSString alloc] initWithFormat:format arguments:arguments];
+  va_end(arguments);
+
+  NSString *line = [NSString stringWithFormat:@"[%@] [VolumeBoostYT] %@\n",
+                                              [NSDate date], message];
+  NSLog(@"[VolumeBoostYT] %@", message);
+
+  @synchronized([NSObject class]) {
+    @try {
+      if (![[NSFileManager defaultManager] fileExistsAtPath:kVolumeBoostYTLogPath]) {
+        [[NSFileManager defaultManager] createFileAtPath:kVolumeBoostYTLogPath
+                                                contents:nil
+                                              attributes:nil];
+      }
+      NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:kVolumeBoostYTLogPath];
+      if (handle) {
+        [handle seekToEndOfFile];
+        [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [handle synchronizeFile];
+        [handle closeFile];
+      }
+    } @catch (NSException *exception) {
+      NSLog(@"[VolumeBoostYT] Could not write %@: %@", kVolumeBoostYTLogPath, exception);
+    }
+  }
+}
+
 static BOOL IsVolumeBoostYTEnabled() {
   NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
   if ([defaults objectForKey:kVolumeBoostYTEnabledKey] == nil) {
@@ -188,9 +222,17 @@ static void SetCustomVolumeMultiplier(float multiplier) {
 %end
 
 %hook IVSPlayer
+- (instancetype)init {
+  id orig = %orig;
+  VolumeBoostYTLog(@"IVSPlayer initialized: %@", orig);
+  return orig;
+}
 - (void)setVolume:(float)volume {
-    NSLog(@"[TwitchTweak] IVSPlayer setVolume: %f", volume);
-    %orig(volume);
+  VolumeBoostYTLog(@"Twitch IVSPlayer setVolume: %.4f (enabled=%@, multiplier=%.2f)",
+                   volume,
+                   IsVolumeBoostYTEnabled() ? @"YES" : @"NO",
+                   GetCustomVolumeMultiplier());
+  %orig(volume);
 }
 %end
 
@@ -406,6 +448,11 @@ static CGPoint initialTouchPoint;
 
 %ctor {
   NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+  VolumeBoostYTLog(@"Loaded in %@ (%@); IVSPlayer class=%@",
+                   bundleID ?: @"<unknown>",
+                   [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleDisplayName"] ?: @"<unknown>",
+                   NSClassFromString(@"IVSPlayer") ? @"FOUND" : @"NOT FOUND");
+
   if ([bundleID isEqualToString:@"com.apple.springboard"]) {
     return;
   }
